@@ -128,9 +128,12 @@ public class NotifyRestServiceImpl implements NotifyRestService {
 	                // CreateEndpoint doesn't want to overwrite. Just use the existing endpoint.
 	                endpointArn = m.group(1);
 	                requestId = ipe.getRequestId();
-	                statusCode = ipe.getStatusCode();
+	                statusCode = HttpStatus.SC_OK;
 
-	                updateCustomUserData(snsClient, endpointArn, customUserData);
+	                boolean result = updateCustomUserData(snsClient, endpointArn, customUserData);
+	                if (!result) {
+	                	throw ipe;
+	                }
 	            } else {
 	                // Re-throw exception, the input is actually bad
 	                throw ipe;
@@ -149,9 +152,12 @@ public class NotifyRestServiceImpl implements NotifyRestService {
 		return null;
 	}
 
-	private void updateCustomUserData(AmazonSNS snsClient, String endpointArn, CustomUserData newCustomUserData) throws IOException {
+	private boolean updateCustomUserData(AmazonSNS snsClient, String endpoint, CustomUserData newCustomUserData) throws IOException {
+		log.debug("Adding custom user data '{}' to endpoint '{}'", newCustomUserData, endpoint);
+
 		// Load existing attributes
-		GetEndpointAttributesRequest getEndpointAttributesRequest = new GetEndpointAttributesRequest().withEndpointArn(endpointArn);
+		GetEndpointAttributesRequest getEndpointAttributesRequest = new GetEndpointAttributesRequest()
+				.withEndpointArn(endpoint);
 
 		GetEndpointAttributesResult getEndpointAttributesResult = snsClient.getEndpointAttributes(getEndpointAttributesRequest);
 
@@ -164,7 +170,7 @@ public class NotifyRestServiceImpl implements NotifyRestService {
 			log.warn("Failed to add new app data '{}'", newCustomUserData.getAppUserData());
 			log.warn("Failed to convert JSON to object", ex);
 
-			return;
+			return false;
 		}
 
 		// Union existing app data with new app data
@@ -177,13 +183,14 @@ public class NotifyRestServiceImpl implements NotifyRestService {
 		customUserData.setModificationDate(newCustomUserData.getCreationDate());
 
 		// Update custom user data
-		Map<String, String> attributes = new HashMap<String, String>();
-		attributes.put("CustomUserData ", applicationService.asJson(customUserData));
-
 		SetEndpointAttributesRequest setEndpointAttributesRequest = new SetEndpointAttributesRequest()
-				.withEndpointArn(endpointArn).withAttributes(attributes);
+				.withEndpointArn(endpoint).addAttributesEntry("CustomUserData", applicationService.asJson(customUserData));
 
 		snsClient.setEndpointAttributes(setEndpointAttributesRequest);
+
+		log.info("Added custom user data '{}' to endpoint '{}'", newCustomUserData, endpoint);
+		
+		return true;
 	}
 
 	@Override
